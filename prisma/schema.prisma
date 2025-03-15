@@ -1,0 +1,251 @@
+// Define the database connection (unchanged)
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Tenant (dealership or seller, updated with User relationship)
+model Tenant {
+  id                Int              @id @default(autoincrement())
+  name              String           // e.g., "ABC Car Dealership"
+  createdBy         String           // ID of the user who created the tenant
+  status            TenantStatus     @default(ACTIVE)
+  monthlyCharge     Float?           // Optional: Platform fees
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  email             String?
+  phoneNumber       String?
+  address           String?
+  subscriptionPlan String 
+
+  // Relationships
+  users             User[]           @relation("TenantUsers") // Staff or admins
+  customers         Customer[]       // Car buyers
+
+  mpesaConfig       MPESAConfig?
+  smsConfig         SMSConfig?
+  assets            Asset[]  
+  auditLogs         AuditLog[] 
+  notifications     Notification[]
+  
+}
+
+
+// SMS Configuration model defined per tenant
+model SMSConfig {
+  id         Int      @id @default(autoincrement())
+  tenantId   Int      @unique
+  partnerId  String
+  apiKey     String
+  shortCode  String
+  customerSupportPhoneNumber String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+
+}
+
+// MPESA Configuration model defined per tenant
+model MPESAConfig {
+  id          Int      @id @default(autoincrement())
+  tenantId    Int      @unique
+  shortCode   String @unique
+  name        String
+  apiKey      String
+  passKey     String
+ 
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+
+
+}
+
+
+model User {
+  id                  Int              @id @default(autoincrement())
+  tenantId            Int              // Tenant (dealership) the user belongs to
+  firstName           String
+  lastName            String
+  email               String           @unique
+  phoneNumber         String           @unique
+  gender              String?
+  county              String?
+  town                String?
+  
+  password            String           // Hashed password
+  role                String[]         // e.g., ["ADMIN", "SALES", "SUPPORT"]
+  customPermissions   Json?            // Optional: Fine-grained permissions
+  status              UserStatus       @default(ACTIVE)
+  mfaEnabled          Boolean          @default(false) // Multi-factor authentication
+  lastLogin           DateTime?        // Tracks last login time
+  loginCount          Int              @default(0)     // Tracks login frequency
+  createdBy           Int?             // User who created this account (optional)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  // Added fields for OTP/password reset
+  resetCode           String?          // Hashed OTP for password reset
+  resetCodeExpiresAt  DateTime?        // OTP expiry time
+  otpAttempts         Int              @default(0) // Failed OTP attempts
+
+  // Relationships
+  tenant              Tenant           @relation("TenantUsers", fields: [tenantId], references: [id], onDelete: Cascade)
+
+  auditLogs           AuditLog[]       // Actions performed by this user
+  notifications       Notification[]   // Notifications sent to this user
+  userActivity        UserActivity[]   @relation("UserActivities") // Properly defined relation
+}
+
+model UserActivity {
+  id        Int      @id @default(autoincrement()) // Change ID to Int to match User ID type
+  userId    Int
+  action    String
+  timestamp DateTime @default(now())
+
+  user      User     @relation("UserActivities", fields: [userId], references: [id], onDelete: Cascade)
+}
+
+
+
+// Customer (car buyers, unchanged but included for context)
+model Customer {
+  id                    String           @id @default(uuid())
+  tenantId              Int
+  firstName             String
+  lastName              String
+  email                 String?
+  phoneNumber           String           @unique
+  monthlyCharge         Float?           // Total monthly installment burden
+  status                CustomerStatus   @default(ACTIVE)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  // Relationships
+  tenant                Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  installments          Installment[]
+}
+
+// Asset (cars, unchanged but included for context)
+model Asset {
+  id                String           @id @default(uuid())
+  tenantId          Int
+  name              String           // e.g., "Toyota Corolla"
+  price             Decimal          // Total price
+  vin               String           @unique // Vehicle Identification Number
+  registrationNumber String?          @unique
+  yearOfManufacture Int
+  make              String
+  model             String
+  color             String?
+  mileage           Int?
+  fuelType          FuelType?
+  transmission      TransmissionType?
+  engineCapacity    Int?
+  condition         CarCondition?
+  imageUrls         String[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  // Relationships
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  installments      Installment[]
+}
+
+// Installment (unchanged, included for context)
+model Installment {
+  id                String           @id @default(uuid())
+  assetId           String
+  customerId        String
+  amount            Decimal
+  paidAmount        Decimal          @default(0)
+  dueDate           DateTime
+  status            InstallmentStatus @default(PENDING)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  // Relationships
+  asset             Asset            @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  customer          Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+}
+
+// AuditLog (reused to track user actions)
+model AuditLog {
+  id          String       @id @default(uuid())
+  tenantId    Int
+  userId      Int
+  action      String       // e.g., "CREATE_CAR", "UPDATE_PAYMENT"
+  resource    String       // e.g., "ASSET", "CUSTOMER"
+  details     Json?        // Additional details
+  description String?
+  createdAt   DateTime     @default(now())
+
+  // Relationships
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Notification (reused for user alerts)
+model Notification {
+  id          String       @id @default(uuid())
+  tenantId    Int
+  userId      Int
+  message     String       // e.g., "New car added to inventory"
+  type        String       // e.g., "ALERT", "REMINDER"
+  read        Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+
+  // Relationships
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Enums (reused and unchanged)
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum TenantStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum InstallmentStatus {
+  PENDING
+  PAID
+  OVERDUE
+}
+
+enum FuelType {
+  PETROL
+  DIESEL
+  ELECTRIC
+  HYBRID
+}
+
+enum TransmissionType {
+  AUTOMATIC
+  MANUAL
+}
+
+enum CarCondition {
+  NEW
+  USED
+  REFURBISHED
+}
