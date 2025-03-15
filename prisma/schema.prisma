@@ -122,8 +122,12 @@ model Customer {
   tenantId              Int
   firstName             String
   lastName              String
+  nationalID            String          @unique 
   email                 String?
   phoneNumber           String           @unique
+  secondaryPhoneNumber  String?
+  county                String?
+  town                  String?
   monthlyCharge         Float?           // Total monthly installment burden
   status                CustomerStatus   @default(ACTIVE)
   createdAt             DateTime         @default(now())
@@ -132,7 +136,7 @@ model Customer {
   // Relationships
   tenant                Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  installments          Installment[]
+  installments          Installment[] 
 }
 
 // Asset (cars, unchanged but included for context)

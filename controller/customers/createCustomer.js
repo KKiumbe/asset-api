@@ -2,113 +2,119 @@ const { PrismaClient,CustomerStatus } = require('@prisma/client'); // Import the
 const prisma = new PrismaClient();
 // Create a new customer
 
+
+
+
 const createCustomer = async (req, res) => {
-  const {
-    tenantId,
-    firstName,
-    lastName,
-    email,
-    phoneNumber,
-    secondaryPhoneNumber,
-    gender,
-    county,
-    town,
-    location,
-    estateName,
-    building,
-    houseNumber,
-    category,
-    monthlyCharge,
-    garbageCollectionDay,
-    collected,
-    closingBalance,
-    status,
-    trashBagsIssued
-
-  } = req.body;
-
-  // Validate required fields
-  if (!tenantId || !firstName || !lastName || !phoneNumber || !monthlyCharge || !garbageCollectionDay) {
-    return res.status(400).json({ message: 'Required fields are missing.' });
-  }
-
-  // Validate status
-  const validStatuses = Object.values(CustomerStatus);
-  if (status && !validStatuses.includes(status)) {
-    return res.status(400).json({ message: `Invalid status value. Valid values: ${validStatuses.join(', ')}` });
-  }
-
-  // Validate garbage collection day
-
-
-  // Validate location format
-  const locationPattern = /^-?\d+\.\d+,-?\d+\.\d+$/;
-  if (location && !locationPattern.test(location)) {
-    return res.status(400).json({ message: 'Invalid location format. Please use "latitude,longitude".' });
-  }
-
   try {
-    // Check if tenant exists
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
+    const { 
+      firstName, 
+      lastName, 
+      nationalID, 
+      email, 
+      phoneNumber, 
+      secondaryPhoneNumber, 
+      county, 
+      town 
+    } = req.body;
+    const tenantId = req.user?.tenantId; // Optional chaining for safety
+    const userId = req.user?.id;
+
+    console.log('Request body:', req.body);
+    console.log('User from token:', req.user);
+
+    if (!tenantId) {
+      return res.status(401).json({ 
+        error: 'Unauthorized', 
+        message: 'No tenant information available' 
+      });
+    }
+
+    if (!firstName || !lastName || !phoneNumber || !nationalID) {
+      return res.status(400).json({ 
+        error: 'Validation Error', 
+        message: 'First name, last name, phone number, and national ID are required' 
+      });
+    }
+
+    const existingCustomerByPhone = await prisma.customer.findUnique({
+      where: { phoneNumber }
     });
-
-    if (!tenant) {
-      return res.status(404).json({ message: 'Tenant not found.' });
+    if (existingCustomerByPhone) {
+      return res.status(409).json({ 
+        error: 'Conflict', 
+        message: 'Phone number already exists' 
+      });
     }
 
-    // Check if authenticated user belongs to the tenant
-    if (req.user.tenantId !== tenantId) {
-      return res.status(403).json({ message: 'User does not belong to the specified tenant.' });
-    }
-
-    // Check if phone number already exists
-    const existingCustomer = await prisma.customer.findUnique({
-      where: { phoneNumber },
+    const existingCustomerByNationalID = await prisma.customer.findFirst({
+      where: { nationalID } // This should now work with the updated schema
     });
-
-    if (existingCustomer && existingCustomer.tenantId === tenantId) {
-      return res.status(400).json({ message: 'Phone number already exists for this tenant.' });
+    if (existingCustomerByNationalID) {
+      return res.status(409).json({ 
+        error: 'Conflict', 
+        message: 'National ID already exists' 
+      });
     }
 
-    // Create customer
     const customer = await prisma.customer.create({
       data: {
         tenantId,
         firstName,
         lastName,
-        email,
+        nationalID,
+        email: email || null,
         phoneNumber,
-        secondaryPhoneNumber,
-        gender,
-        county,
-        town,
-        location,
-        estateName,
-        building,
-        houseNumber,
-        category,
-        monthlyCharge,
-        garbageCollectionDay,
-        trashBagsIssued :trashBagsIssued?? false,
-        status: status ?? 'ACTIVE', // Use default if not provided
-        collected: collected ?? false, // Default to false
-        closingBalance: closingBalance ?? 0, // Default to 0
+        secondaryPhoneNumber: secondaryPhoneNumber || null,
+        county: county || null,
+        town: town || null,
+        monthlyCharge: null,
+        status: 'ACTIVE'
       },
     });
 
-    res.status(201).json({ message: 'Customer created successfully', customer });
-  } catch (error) {
-    console.error('Error creating customer:', error);
+   
 
-    // Handle unique constraint violation (e.g., phoneNumber)
-    if (error.code === 'P2002' && error.meta?.target.includes('phoneNumber')) {
-      return res.status(400).json({ message: 'Phone number must be unique.' });
+    if (!userId) {
+      console.warn('User ID is missing, skipping audit log entry');
+    } else {
+      await prisma.auditLog.create({
+        data: {
+          tenantId,
+          userId,
+          action: 'CREATE_CUSTOMER',
+          resource: 'CUSTOMER',
+          details: { customerId: customer.id },
+          description: `Created customer ${firstName} ${lastName} with National ID ${nationalID}`,
+        },
+      });
     }
+    
+    
 
-    // Handle other errors
-    res.status(500).json({ message: 'Internal server error' });
+    res.status(201).json({
+      success: true,
+      data: customer,
+      message: 'Customer created successfully'
+    });
+  } catch (error) {
+    console.error('Detailed error creating customer:', {
+      message: error.message,
+      code: error.code,
+      meta: error.meta,
+      stack: error.stack
+    });
+    res.status(500).json({ 
+      error: 'Internal Server Error', 
+      message: 'Failed to create customer',
+      ...(process.env.NODE_ENV === 'development' && { details: error.message })
+    });
   }
 };
 
 module.exports = { createCustomer };
+
+
+
+
+
